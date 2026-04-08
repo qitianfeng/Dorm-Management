@@ -1,0 +1,40 @@
+# Docker Compose configuration for Dormitory Management System
+# 简化版：仅包含MySQL和Redis
+# 后端和前端使用本地方式运行
+
+name: dormitory-management-system
+
+services:
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: dormitory-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: dormitory_db
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis缓存（可选）
+  redis:
+    image: redis:7-alpine
+    container_name: dormitory-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    profiles:
+      - redis  # 使用 --profile redis 启用
+
+volumes:
+  mysql_data:

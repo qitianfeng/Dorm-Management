@@ -1,0 +1,706 @@
+<template>
+  <div class="dorm-selection-page">
+    <van-nav-bar title="选宿舍" left-arrow @click-left="$router.back()" />
+    
+    <div v-if="loading" class="loading-container">
+      <van-loading size="48px" type="spinner">加载中...</van-loading>
+    </div>
+    
+    <van-empty v-else-if="!config" description="当前没有可用的选宿舍配置" />
+    
+    <template v-else>
+      <div v-if="mySelection" class="selected-section">
+        <div class="success-icon">
+          <van-icon name="success" size="48" color="#52c41a" />
+        </div>
+        <div class="success-title">您已选择宿舍</div>
+        <van-cell-group inset class="selected-card" round>
+          <van-cell title="楼栋" :value="mySelection.buildingName" icon="location-o" />
+          <van-cell title="房间号" :value="mySelection.roomNumber" icon="hotel-o" />
+          <van-cell title="床位号" icon="friends-o">
+            <template #value>
+              <van-tag type="success" size="large">{{ mySelection.bedNumber }}号床</van-tag>
+            </template>
+          </van-cell>
+          <van-cell title="选择时间" icon="clock-o">
+            <template #value>
+              <span>{{ formatTime(mySelection.selectTime) }}</span>
+            </template>
+          </van-cell>
+        </van-cell-group>
+        <div class="cancel-section">
+          <!-- 只有未入住的学生才能取消选宿舍 -->
+          <van-button v-if="!hasAccommodation" type="danger" size="large" round block @click="handleCancel">
+            取消选择
+          </van-button>
+          <van-notice-bar v-else left-icon="info-o" background="#fffbe8" color="#ed6a0c">
+            您已入住宿舍，如需更换请申请换宿
+          </van-notice-bar>
+        </div>
+      </div>
+      
+      <div v-else class="selection-process">
+        <div class="countdown-wrapper">
+          <div class="countdown-card">
+            <div class="countdown-header">
+              <van-icon name="clock-o" size="20" color="#fff" />
+              <span>选宿舍剩余时间</span>
+            </div>
+            <van-count-down :time="countdownTime" format="DD 天 HH 时 mm 分 ss 秒" @finish="onCountdownFinish" />
+            <div class="countdown-tip">倒计时结束后将自动分配宿舍</div>
+          </div>
+        </div>
+        
+        <div class="info-section">
+          <van-cell-group inset round>
+            <van-cell title="配置名称" :value="config.configName" />
+            <van-cell title="时间范围" :value="`${formatDate(config.startTime)} - ${formatDate(config.endTime)}`" />
+            <van-cell title="可选学院">
+              <template #value>
+                <div class="college-tags">
+                  <van-tag 
+                    v-for="college in configColleges" 
+                    :key="college" 
+                    type="primary" 
+                    plain 
+                    size="small"
+                  >
+                    {{ college }}
+                  </van-tag>
+                </div>
+              </template>
+            </van-cell>
+          </van-cell-group>
+        </div>
+        
+        <div class="section-wrapper">
+          <div class="section-header">
+            <span class="step-number">1</span>
+            <span class="step-text">选择楼栋</span>
+          </div>
+          <div class="building-grid">
+            <div 
+              v-for="building in buildings" 
+              :key="building.id"
+              :class="{ 'building-card': true, 'selected': selectedBuildingId === building.id }"
+              class="building-card" 
+              @click="selectBuilding(building)"
+            >
+              <div class="building-header">
+                <van-icon :name="getBuildingIcon(building.type)" size="28" />
+                <span class="building-name">{{ building.buildingName }}</span>
+              </div>
+              <div class="building-info">
+                <span class="info-label">可用床位</span>
+                <span class="info-value">{{ getAvailableCount(building.id) }}床</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="selectedBuildingId" class="section-wrapper">
+          <div class="section-header">
+            <span class="step-number">2</span>
+            <span class="step-text">选择房间</span>
+          </div>
+          <div v-if="filteredRooms.length > 0" class="room-list">
+            <div 
+              v-for="room in filteredRooms" 
+              :key="room.id"
+              :class="{ 'room-card': true, 'selected': selectedRoomId === room.id, 'disabled': room.availableBeds === 0 }"
+              class="room-card" 
+              @click="selectRoom(room)"
+            >
+              <div class="room-header">
+                <span class="room-number">{{ room.roomNumber }}</span>
+                <van-tag :type="getRoomStatusTagType(room.availableBeds)" size="small" plain>{{ room.availableBeds }}床可选</van-tag>
+              </div>
+              <div class="room-body">
+                <span class="room-type">{{ formatRoomType(room.roomType) }}</span>
+                <span class="room-facilities">{{ room.facilities }}</span>
+              </div>
+            </div>
+          </div>
+          <van-empty v-else description="该楼暂无可用房间" image="search" />
+        </div>
+        
+        <div v-if="selectedRoom" class="section-wrapper">
+          <div class="section-header">
+            <span class="step-number">3</span>
+            <span class="step-text">选择床位</span>
+          </div>
+          <div v-if="selectedRoom && selectedRoom.beds" class="bed-selection">
+            <div class="bed-grid">
+              <div 
+                v-for="bed in selectedRoom.beds" 
+                :key="bed"
+                :class="{ 'bed-item': true, 'selected': selectedBed === bed }"
+                class="bed-item" 
+                @click="selectBed(bed)"
+              >
+                <van-icon name="user-o" size="20" />
+                <span class="bed-label">{{ bed }}床</span>
+              </div>
+            </div>
+          </div>
+          <van-empty v-else description="该房间已选满" image="error" />
+        </div>
+        
+        <div v-if="selectedBed" class="bottom-action">
+          <van-button type="primary" size="large" round :loading="submitting" @click="handleSubmit" block>
+            <template #default>
+              <span v-if="selectedRoom">确认选择 {{ selectedRoom?.roomNumber }} {{ selectedBed }}号床</span>
+              <span v-else>确认选择床位</span>
+            </template>
+          </van-button>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { showToast, showConfirmDialog, showLoadingToast, closeToast } from 'vant'
+import { getDormSelectionConfig, getAvailableRooms, selectRoom as apiSelectRoom, getMySelection, cancelSelection, autoAllocate, getStudentInfo } from '@/api/h5'
+import dayjs from 'dayjs'
+
+const router = useRouter()
+const loading = ref(true)
+const submitting = ref(false)
+const config = ref(null)
+const mySelection = ref(null)
+const buildings = ref([])
+const rooms = ref([])
+const selectedBuildingId = ref(null)
+const selectedRoomId = ref(null)
+const selectedBed = ref('')
+const hasAccommodation = ref(false) // 是否已有住宿（已入住）
+
+const configColleges = computed(() => {
+  if (!config.value?.allowedColleges) return []
+  return config.value.allowedColleges.split(',').map(c => c.trim())
+})
+
+const countdownTime = computed(() => {
+  if (!config.value?.endTime) return 0
+  const endTime = new Date(config.value.endTime).getTime()
+  const now = Date.now()
+  const diff = endTime - now
+  return diff > 0 ? diff : 0
+})
+
+const filteredRooms = computed(() => {
+  if (!selectedBuildingId.value) return []
+  return rooms.value.filter(r => r.buildingId === selectedBuildingId.value)
+})
+
+const selectedRoom = computed(() => {
+  if (!selectedRoomId.value) return null
+  return rooms.value.find(r => r.id === selectedRoomId.value)
+})
+
+const formatDate = (date) => {
+  return date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'
+}
+
+const formatTime = (time) => {
+  return time ? dayjs(time).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
+
+const getBuildingIcon = (type) => {
+  const icons = {
+    '男生宿舍': 'location-o',
+    '女生宿舍': 'shop-o',
+    '男生宿舍': 'wap-home-o'
+  }
+  return icons[type] || 'location-o'
+}
+
+const getBuildingTagType = (type) => {
+  const types = {
+    '男生宿舍': { text: '男宿', type: 'danger' },
+    '女生宿舍': { text: '女宿', type: 'primary' }
+  }
+  return types[type] || { text: '混合', type: 'default' }
+}
+
+const getRoomStatusTagType = (availableBeds) => {
+  if (availableBeds >= 3) return { text: '充足', type: 'success' }
+  if (availableBeds >= 1) return { text: '紧张', type: 'warning' }
+  if (availableBeds === 0) return { text: '已满', type: 'danger' }
+  return { text: '空闲', type: 'default' }
+}
+
+const formatRoomType = (type) => {
+  const types = {
+    'FOUR_PERSON': '四人间',
+    'SIX_PERSON': '六人间',
+    'EIGHT_PERSON': '八人间'
+  }
+  return types[type] || '未知'
+}
+
+const getAvailableCount = (buildingId) => {
+  return rooms.value
+    .filter(r => r.buildingId === buildingId)
+    .reduce((sum, r) => sum + (r.availableBeds || 0), 0)
+}
+
+const loadData = async () => {
+  loading.value = true
+  try {
+    // 首先检查学生是否已有住宿（已入住的学生不能选宿舍）
+    const infoRes = await getStudentInfo()
+    hasAccommodation.value = !!(infoRes.data?.accommodation?.roomNumber)
+    
+    const [configRes, selectionRes, roomsRes] = await Promise.all([
+      getDormSelectionConfig(),
+      getMySelection(),
+      getAvailableRooms()
+    ])
+    config.value = configRes.data
+    mySelection.value = selectionRes.data
+    
+    if (roomsRes.data) {
+      rooms.value = roomsRes.data
+      const buildingMap = new Map()
+      roomsRes.data.forEach(room => {
+        if (!buildingMap.has(room.buildingId)) {
+          buildingMap.set(room.buildingId, {
+            id: room.buildingId,
+            buildingName: room.buildingName,
+            type: room.buildingType,
+            count: rooms.value.filter(r => r.buildingId === room.buildingId).length,
+            availableBeds: rooms.value.reduce((sum, r) => sum + (r.availableBeds || 0), 0)
+          })
+        }
+      })
+      buildings.value = Array.from(buildingMap.values())
+    }
+  } catch (error) {
+    showToast('加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const selectBuilding = (building) => {
+  selectedBuildingId.value = building.id
+  selectedRoomId.value = null
+  selectedBed.value = ''
+}
+
+const selectRoom = (room) => {
+  if (room.availableBeds === 0) return
+  selectedRoomId.value = room.id
+  selectedBed.value = ''
+}
+
+const selectBed = (bed) => {
+  selectedBed.value = bed
+}
+
+const handleSubmit = async () => {
+  if (!selectedRoomId.value || !selectedBed.value) {
+    showToast('请选择房间和床位')
+    return
+  }
+  
+  try {
+    await showConfirmDialog({
+      title: '确认选择',
+      message: `确定选择 ${selectedRoom.value.roomNumber} 房间的 ${selectedBed.value}号床吗？`
+    })
+    
+    submitting.value = true
+    await apiSelectRoom({
+      roomId: selectedRoomId.value,
+      bedNumber: selectedBed.value
+    })
+    
+    showToast('选宿舍成功')
+    await loadData()
+  } catch (error) {
+    if (error !== 'cancel') {
+      showToast('选择失败，请重试')
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+const handleCancel = async () => {
+  try {
+    await showConfirmDialog({
+      title: '取消选择',
+      message: '确定要取消已选宿舍吗？取消后需要重新选择。'
+    })
+    
+    const loadingToast = showLoadingToast({ message: '处理中...', forbidClick: true })
+    await cancelSelection()
+    closeToast()
+    
+    showToast('已取消选择')
+    await loadData()
+  } catch (error) {
+    closeToast()
+    if (error !== 'cancel') {
+      // 显示后端返回的错误信息
+      const message = error?.response?.data?.message || error?.message || '取消失败'
+      showToast(message)
+    }
+  }
+}
+
+const onCountdownFinish = () => {
+  showToast('选宿舍时间已结束，系统将为您自动分配宿舍')
+  setTimeout(async () => {
+    try {
+      const res = await autoAllocate()
+      if (res.code === 200) {
+        showToast(res.message)
+        await loadData()
+      }
+    } catch (error) {
+      showToast('自动分配失败，请联系管理员')
+    }
+  }, 2000)
+}
+
+onMounted(() => {
+  loadData()
+})
+</script>
+
+<style scoped lang="scss">
+.dorm-selection-page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f5f7fa 0%, #f0f2f4 0%);
+  padding-bottom: 80px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+
+.selected-section {
+  padding: 20px;
+  animation: slideInUp 0.3s ease-out;
+}
+
+.success-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #52c41a 0%, #764ba2 100%);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: success-pulse 2s ease-in-out infinite;
+}
+
+.success-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #323233;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.selected-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  padding: 24px;
+}
+
+:deep(.van-cell-group) .van-cell {
+  border-bottom: 1px solid #ebeddee8;
+}
+
+.cancel-section {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.selection-process {
+  padding: 0 16px;
+}
+
+.countdown-wrapper {
+  padding: 0 16px 0 16px 0;
+}
+
+.countdown-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 16px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  padding: 24px 20px;
+}
+
+.countdown-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.countdown-time {
+  :deep(.van-count-down) {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+}
+
+.countdown-tip {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: center;
+  margin-top: 12px;
+}
+
+.info-section {
+  margin-bottom: 24px;
+}
+
+.section-wrapper {
+  padding: 0 16px 0;
+  margin-top: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 8px 16px 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 30px 30px 0 0 0;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.step-number {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.step-text {
+  font-size: 14px;
+  color: #323233;
+  font-weight: 600;
+}
+
+.building-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.building-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  padding: 20px;
+  text-align: center;
+
+  &.selected {
+    border-color: #1989fa;
+    background: #f8f9ff;
+    transform: translateY(-4px);
+  }
+}
+
+.building-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.building-icon {
+  color: #646566;
+  font-size: 24px;
+}
+
+.building-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #323233;
+}
+
+.building-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-label {
+  font-size: 12px;
+  color: #969799;
+}
+
+.info-value {
+  font-size: 20px;
+  color: #323233;
+  font-weight: 600;
+}
+
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.room-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  padding: 14px 16px;
+
+  &.selected {
+    border-color: #1989fa;
+    background: #f8f9ff;
+    transform: translateY(-4px);
+  }
+
+  &.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.room-number {
+  font-size: 18px;
+  font-weight: 600;
+  color: #323233;
+}
+
+.room-body {
+  display: flex;
+  gap: 12px;
+}
+
+.room-type {
+  font-size: 13px;
+  color: #323233;
+}
+
+.room-facilities {
+  font-size: 12px;
+  color: #969799;
+}
+
+.bed-selection {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bed-item {
+  background: #fff;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  text-align: center;
+  padding: 20px 0;
+  font-size: 14px;
+  color: #646566;
+
+  &.active {
+    border-color: #1989fa;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 4px 16px rgba(25, 118, 238, 0.2);
+    transform: translateY(-4px);
+  }
+}
+
+.bed-label {
+  font-size: 14px;
+  color: #323233;
+  font-weight: 500;
+}
+
+.bottom-action {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px 0 12px;
+  background: #fff;
+  box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(20px);
+  backdrop-filter: brightness(0.95);
+  z-index: 100;
+}
+
+:deep(.van-button) {
+  font-weight: 600;
+}
+
+:deep(.van-cell-group) .van-cell {
+  padding: 12px 0;
+}
+
+:deep(.van-count-down) {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 2px;
+}
+
+:deep(.van-tag) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  backdrop-filter: brightness(0.95);
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .building-grid {
+    grid-template-columns: repeat(1, 1fr);
+  }
+
+  .room-list {
+    .bed-selection {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+}
+</style>

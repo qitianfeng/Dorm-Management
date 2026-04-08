@@ -1,0 +1,68 @@
+# ========================
+# 宿舍管理系统 .gitignore
+# ========================
+
+# === IDE / Editor ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === Java / Maven / Spring Boot ===
+backend/target/
+backend/*.log
+backend/logs/
+backend/stderr.log
+backend/stdout.log
+backend/uploads/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# === Node.js / Frontend ===
+frontend/admin/node_modules/
+frontend/admin/dist/
+frontend/h5/node_modules/
+frontend/h5/dist/
+frontend/h5.log
+*.tsbuildinfo
+.npm
+
+# === Docker ===
+docker-data/
+
+# === Database ===
+database/backup/
+database/*.py
+!database/init.sql
+
+# === Logs ===
+logs/
+*.log
+h5.log
+backend-logs*.txt
+
+# === Env / Secrets ===
+.env
+.env.local
+.env.*.local
+cookies.txt
+
+# === Temp / Cache ===
+.ruff_cache/
+.aiflow/
+.devflow/
+*.tmp
+*.bak
+nul
